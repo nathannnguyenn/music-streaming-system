@@ -199,8 +199,69 @@ Milestone 2 Communication Plane:
 How to Install Dependencies
 The Milestone 2 communication engine (milestone2_system.py) is built entirely with Python's standard library (socket, struct, json, threading, datetime, uuid), so no external packages are required to run Milestone 2.
 
+
+
+## Milestone 3: P2P Integration (Chord DHT)
+
+### Required Software
+*   Python 3.11+ (Local environment recommended for P2P simulation).
+*   No external pip dependencies are required for the P2P engine.
+
+### How to Install Dependencies
+The P2P overlay `milestone3_p2p.py` is built entirely using Python's standard library (`hashlib`, `socket`, `threading`, `json`). No installation is required beyond a standard Python 3.11 environment.
+
+### How to Start Each Service and Run the Demo
+To execute the P2P network behavior and generate the terminal output for the video submission:
+1.  Navigate to the repository root.
+2.  Execute the script:
+    ```bash
+    python3 milestone3_p2p.py
+    ```
+This script automatically orchestrates the startup, join, lookup, and leave procedures across four threaded local peer nodes (Ports 9001-9004). 
+
+### How to Reproduce the Test Cases
+The script `milestone3_p2p.py` is structured as a chronological sequence of automated test cases. Running the file automatically reproduces:
+1.  **Network Bootstrap:** Nodes 9001, 9002, 9003 instantiate and form the base ring.
+2.  **Peer Join:** Node 9004 is instantiated and routes a `FIND_SUCCESSOR` request to insert itself into the hash space.
+3.  **Lookup & Discovery:** A client generates a SHA-1 hash for `track_101_chunk_01.aac` and issues a lookup. The nodes traverse their successor pointers until the responsible node is located and the chunk is cached.
+4.  **Graceful Leave:** Node 9002 executes the `leave()` method, issuing `UPDATE_SUCCESSOR` and `NOTIFY` messages to heal the ring before closing its socket.
+
+
+## Milestone 4: Coordination (Lamport clocks, Bully election, distributed mutex)
+
+Full design and report material: [docs/milestone4.md](docs/milestone4.md).
+
+### Required software
+* Python 3.9+; standard library only, no pip install needed. `pytest` is only needed to run the tests.
+
+### What it does
+* 5 nodes (N1-N5), each a separate process on TCP ports 9101-9105, each with a **Lamport clock**. Every message carries `ts`.
+* **Bully leader election**: the highest live id is the coordinator. Heartbeats detect a leader crash.
+* **Centralized mutual exclusion**: the elected leader grants a lock. Waiting nodes are queued by Lamport timestamp.
+* **Shared resource**: a collaborative playlist file `data/m4/shared_playlist.json`, edited read-modify-write. It is protected by the lock plus fencing tokens.
+* **Event ordering**: `merge_logs` merges all node logs into one `(Lamport, node)` total order and verifies causality and mutual exclusion.
+
+### One-command demo
 ```bash
-git clone [https://github.com/Dakshaarvind/music-streaming-system.git](https://github.com/Dakshaarvind/music-streaming-system.git)
-cd music-streaming-system
-Optional (only needed if running Milestone 1 HTTP services):
-pip install -r requirements.txt
+python3 -m milestone4.demo            # add M4_STEP=1 to pause between phases
+```
+The demo runs these phases: startup election, then concurrent writes without the lock (lost updates), then with the lock (all kept), then coordinator crash while the lock is held (re-election and recovery), then the old leader restarting, and finally the merged ordered log with a PASS/FAIL verification.
+
+### Manual multi-terminal run
+```bash
+python3 -m milestone4.client reset                 # once, before starting nodes
+python3 -m milestone4.node --id 1                  # terminals 1-5, ids 1..5
+python3 -m milestone4.client status                # leader / term / clock / lock queue
+python3 -m milestone4.client burst                 # all nodes edit at once, with the lock
+python3 -m milestone4.client burst --unsafe        # same, without the lock -> lost updates
+python3 -m milestone4.client burst --hold 4        # long critical sections (time to crash the leader)
+python3 -m milestone4.client playlist [--unsafe]
+python3 -m milestone4.client crash --node 5        # or press Ctrl+C in N5's terminal
+python3 -m milestone4.merge_logs --key --verify    # ordered events + checks
+```
+
+### Tests
+```bash
+python -m pytest tests/test_milestone4.py -v
+```
+The tests cover the Lamport rules, fencing tokens, Bully election, serialized writes, unsafe-mode lost updates, coordinator crash, recovery and leader return, and lock-holder crash.
